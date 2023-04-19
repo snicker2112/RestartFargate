@@ -1,87 +1,35 @@
 import boto3
 import time
 
-
-def restart_msk_brokers(cluster_arn):
-    """
-    Restarts AWS MSK brokers one at a time, testing each before moving on to the next.
-    """
-    client = boto3.client("kafka")
-
-    # Get a list of all brokers in the cluster
+def get_msk_broker_ids(cluster_arn):
+    client = boto3.client('kafka')
     response = client.list_nodes(ClusterArn=cluster_arn)
-    brokers = response["NodeInfoList"]
 
-    # Loop through each broker
-    for broker in brokers:
-        broker_id = broker["BrokerNodeInfo"]["BrokerNodeId"]
-        print(f"Restarting broker {broker_id}...")
+    broker_ids = []
+    for node_info in response['NodeInfoList']:
+        broker_id = node_info['BrokerNodeInfo']['BrokerId']
+        broker_ids.append(str(broker_id))
 
-        # Stop the broker
-        client.update_broker_storage(
+    return broker_ids
+
+def reboot_msk_brokers(cluster_arn, broker_ids, sleep_time=120):
+    client = boto3.client('kafka')
+
+    for broker_id in broker_ids:
+        print(f"Restarting broker with ID: {broker_id}")
+        client.reboot_broker(
             ClusterArn=cluster_arn,
-            BrokerIds=[broker_id],
-            CurrentVersion="KAFKA_V2_8_0",
-            TargetBrokerEBSVolumeInfo=[],
+            BrokerIds=[broker_id]
         )
+        print(f"Waiting {sleep_time} seconds before restarting the next broker...")
+        time.sleep(sleep_time)
+    print("Rolling restart complete.")
 
-        # Wait for the broker to stop
-        while True:
-            response = client.describe_cluster_operation(
-                ClusterArn=cluster_arn, OperationArn=response["ClusterOperationArn"]
-            )
-            status = response["OperationState"]
-            if status == "COMPLETED":
-                print(f"Broker {broker_id} stopped successfully.")
-                break
-            elif status == "FAILED":
-                print(f"Failed to stop broker {broker_id}.")
-                return
+if __name__ == "__main__":
+    # Replace with your MSK cluster ARN
+    cluster_arn = "arn:aws:kafka:REGION:ACCOUNT_ID:cluster/CLUSTER_NAME/UUID"
 
-        # Start the broker
-        client.update_broker_storage(
-            ClusterArn=cluster_arn,
-            BrokerIds=[broker_id],
-            CurrentVersion="KAFKA_V2_8_0",
-            TargetBrokerEBSVolumeInfo=[
-                {
-                    "BrokerEBSVolumeInfo": {
-                        "KafkaBrokerNodeId": broker_id,
-                        "VolumeSizeGB": 1000,
-                        "VolumeType": "gp2",
-                    }
-                }
-            ],
-        )
+    broker_ids = get_msk_broker_ids(cluster_arn)
+    print(f"Discovered broker IDs: {broker_ids}")
 
-        # Wait for the broker to start
-        while True:
-            response = client.describe_cluster_operation(
-                ClusterArn=cluster_arn, OperationArn=response["ClusterOperationArn"]
-            )
-            status = response["OperationState"]
-            if status == "COMPLETED":
-                print(f"Broker {broker_id} started successfully.")
-                break
-            elif status == "FAILED":
-                print(f"Failed to start broker {broker_id}.")
-                return
-
-        # Test the broker
-        print(f"Testing broker {broker_id}...")
-        time.sleep(60)  # Wait for the broker to become fully available
-        response = client.get_bootstrap_brokers(ClusterArn=cluster_arn)
-        bootstrap_brokers = response["BootstrapBrokerString"].split(",")
-        if f"kafka://{broker['BrokerNodeInfo']['Endpoints'][0]}" in bootstrap_brokers:
-            print(f"Broker {broker_id} is working correctly.")
-        else:
-            print(f"Failed to verify broker {broker_id}.")
-            return
-
-    print("All brokers have been restarted and tested successfully.")
-
-
-"""
-To use this function, simply call it with the ARN of your AWS MSK cluster:
-restart_msk_brokers('arn:aws:kafka:us-west-2:123456789012:cluster/my-cluster/abcd1234-5678-90ab-cdef-0123456789ab')
-"""
+    reboot_msk_brokers(cluster_arn, broker_ids)
