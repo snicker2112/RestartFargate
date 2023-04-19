@@ -1,5 +1,18 @@
-import boto3
+import sys
 import time
+
+try:
+    import boto3
+except ImportError:
+    print("Error: boto3 library is not installed. Please install it using 'pip install boto3'")
+    sys.exit(1)
+
+def check_aws_credentials():
+    try:
+        boto3.client('sts').get_caller_identity()
+    except Exception as e:
+        print("Error: AWS credentials are not set. Please set your AWS credentials as environment variables or in a configuration file.")
+        sys.exit(1)
 
 def get_msk_broker_ids(cluster_arn):
     client = boto3.client('kafka')
@@ -26,6 +39,9 @@ def reboot_msk_brokers(cluster_arn, broker_ids, sleep_time=120):
     print("Rolling restart complete.")
 
 if __name__ == "__main__":
+    # Check for prerequisites
+    check_aws_credentials()
+
     # Replace with your MSK cluster ARN
     cluster_arn = "arn:aws:kafka:REGION:ACCOUNT_ID:cluster/CLUSTER_NAME/UUID"
 
